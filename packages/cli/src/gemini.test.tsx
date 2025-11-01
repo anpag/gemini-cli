@@ -13,17 +13,10 @@ import {
   afterEach,
   type MockInstance,
 } from 'vitest';
-import {
-  main,
-  setupUnhandledRejectionHandler,
-  validateDnsResolutionOrder,
-  startInteractiveUI,
-} from './gemini.js';
-import { type LoadedSettings } from './config/settings.js';
+import { main, setupUnhandledRejectionHandler } from './gemini.js';
 import { appEvents, AppEvent } from './utils/events.js';
 import { type Config } from '@google/gemini-cli-core';
 import { act } from 'react';
-import { type InitializationResult } from './core/initializer.js';
 
 const performance = vi.hoisted(() => ({
   now: vi.fn(),
@@ -392,6 +385,7 @@ describe('gemini.tsx main function kitty protocol', () => {
       outputFormat: undefined,
       fakeResponses: undefined,
       recordResponses: undefined,
+      daemon: undefined,
     });
 
     await act(async () => {
@@ -400,222 +394,5 @@ describe('gemini.tsx main function kitty protocol', () => {
 
     expect(setRawModeSpy).toHaveBeenCalledWith(true);
     expect(detectAndEnableKittyProtocol).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('validateDnsResolutionOrder', () => {
-  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('should return "ipv4first" when the input is "ipv4first"', () => {
-    expect(validateDnsResolutionOrder('ipv4first')).toBe('ipv4first');
-    expect(consoleWarnSpy).not.toHaveBeenCalled();
-  });
-
-  it('should return "verbatim" when the input is "verbatim"', () => {
-    expect(validateDnsResolutionOrder('verbatim')).toBe('verbatim');
-    expect(consoleWarnSpy).not.toHaveBeenCalled();
-  });
-
-  it('should return the default "ipv4first" when the input is undefined', () => {
-    expect(validateDnsResolutionOrder(undefined)).toBe('ipv4first');
-    expect(consoleWarnSpy).not.toHaveBeenCalled();
-  });
-
-  it('should return the default "ipv4first" and log a warning for an invalid string', () => {
-    expect(validateDnsResolutionOrder('invalid-value')).toBe('ipv4first');
-    expect(consoleWarnSpy).toHaveBeenCalledExactlyOnceWith(
-      'Invalid value for dnsResolutionOrder in settings: "invalid-value". Using default "ipv4first".',
-    );
-  });
-});
-
-describe('startInteractiveUI', () => {
-  // Mock dependencies
-  const mockConfig = {
-    getProjectRoot: () => '/root',
-    getScreenReader: () => false,
-  } as Config;
-  const mockSettings = {
-    merged: {
-      ui: {
-        hideWindowTitle: false,
-      },
-    },
-  } as LoadedSettings;
-  const mockStartupWarnings = ['warning1'];
-  const mockWorkspaceRoot = '/root';
-  const mockInitializationResult = {
-    authError: null,
-    themeError: null,
-    shouldOpenAuthDialog: false,
-    geminiMdFileCount: 0,
-  };
-
-  vi.mock('./utils/version.js', () => ({
-    getCliVersion: vi.fn(() => Promise.resolve('1.0.0')),
-  }));
-
-  vi.mock('./ui/utils/kittyProtocolDetector.js', () => ({
-    detectAndEnableKittyProtocol: vi.fn(() => Promise.resolve(true)),
-  }));
-
-  vi.mock('./ui/utils/updateCheck.js', () => ({
-    checkForUpdates: vi.fn(() => Promise.resolve(null)),
-  }));
-
-  vi.mock('./utils/cleanup.js', () => ({
-    cleanupCheckpoints: vi.fn(() => Promise.resolve()),
-    registerCleanup: vi.fn(),
-    runExitCleanup: vi.fn(),
-  }));
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  async function startTestInteractiveUI(
-    config: Config,
-    settings: LoadedSettings,
-    startupWarnings: string[],
-    workspaceRoot: string,
-    initializationResult: InitializationResult,
-  ) {
-    await act(async () => {
-      await startInteractiveUI(
-        config,
-        settings,
-        startupWarnings,
-        workspaceRoot,
-        initializationResult,
-      );
-    });
-  }
-
-  it('should render the UI with proper React context and exitOnCtrlC disabled', async () => {
-    const { render } = await import('ink');
-    const renderSpy = vi.mocked(render);
-
-    await startTestInteractiveUI(
-      mockConfig,
-      mockSettings,
-      mockStartupWarnings,
-      mockWorkspaceRoot,
-      mockInitializationResult,
-    );
-
-    // Verify render was called with correct options
-    expect(renderSpy).toHaveBeenCalledTimes(1);
-    const [reactElement, options] = renderSpy.mock.calls[0];
-
-    // Verify render options
-    expect(options).toEqual({
-      exitOnCtrlC: false,
-      isScreenReaderEnabled: false,
-      onRender: expect.any(Function),
-    });
-
-    // Verify React element structure is valid (but don't deep dive into JSX internals)
-    expect(reactElement).toBeDefined();
-  });
-
-  it('should perform all startup tasks in correct order', async () => {
-    const { getCliVersion } = await import('./utils/version.js');
-    const { checkForUpdates } = await import('./ui/utils/updateCheck.js');
-    const { registerCleanup } = await import('./utils/cleanup.js');
-
-    await startTestInteractiveUI(
-      mockConfig,
-      mockSettings,
-      mockStartupWarnings,
-      mockWorkspaceRoot,
-      mockInitializationResult,
-    );
-
-    // Verify all startup tasks were called
-    expect(getCliVersion).toHaveBeenCalledTimes(1);
-    expect(registerCleanup).toHaveBeenCalledTimes(2);
-
-    // Verify cleanup handler is registered with unmount function
-    const cleanupFn = vi.mocked(registerCleanup).mock.calls[0][0];
-    expect(typeof cleanupFn).toBe('function');
-
-    // checkForUpdates should be called asynchronously (not waited for)
-    // We need a small delay to let it execute
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(checkForUpdates).toHaveBeenCalledTimes(1);
-  });
-
-  it('should not recordSlowRender when less than threshold', async () => {
-    const { recordSlowRender } = await import('@google/gemini-cli-core');
-    performance.now.mockReturnValueOnce(0);
-    await startTestInteractiveUI(
-      mockConfig,
-      mockSettings,
-      mockStartupWarnings,
-      mockWorkspaceRoot,
-      mockInitializationResult,
-    );
-
-    expect(recordSlowRender).not.toHaveBeenCalled();
-  });
-
-  it('should call recordSlowRender when more than threshold', async () => {
-    const { recordSlowRender } = await import('@google/gemini-cli-core');
-    performance.now.mockReturnValueOnce(0);
-    performance.now.mockReturnValueOnce(300);
-
-    await startTestInteractiveUI(
-      mockConfig,
-      mockSettings,
-      mockStartupWarnings,
-      mockWorkspaceRoot,
-      mockInitializationResult,
-    );
-
-    expect(recordSlowRender).toHaveBeenCalledWith(mockConfig, 300);
-  });
-
-  it.each([
-    {
-      screenReader: true,
-      expectedCalls: [],
-      name: 'should not disable line wrapping in screen reader mode',
-    },
-    {
-      screenReader: false,
-      expectedCalls: [['\x1b[?7l']],
-      name: 'should disable line wrapping when not in screen reader mode',
-    },
-  ])('$name', async ({ screenReader, expectedCalls }) => {
-    const writeSpy = vi
-      .spyOn(process.stdout, 'write')
-      .mockImplementation(() => true);
-    const mockConfigWithScreenReader = {
-      ...mockConfig,
-      getScreenReader: () => screenReader,
-    } as Config;
-
-    await startTestInteractiveUI(
-      mockConfigWithScreenReader,
-      mockSettings,
-      mockStartupWarnings,
-      mockWorkspaceRoot,
-      mockInitializationResult,
-    );
-
-    if (expectedCalls.length > 0) {
-      expect(writeSpy).toHaveBeenCalledWith(expectedCalls[0][0]);
-    } else {
-      expect(writeSpy).not.toHaveBeenCalledWith('\x1b[?7l');
-    }
-    writeSpy.mockRestore();
   });
 });

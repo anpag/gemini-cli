@@ -60,6 +60,7 @@ export interface CliArgs {
   debug: boolean | undefined;
   prompt: string | undefined;
   promptInteractive: string | undefined;
+  daemon: boolean | undefined;
 
   yolo: boolean | undefined;
   approvalMode: string | undefined;
